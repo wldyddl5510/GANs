@@ -20,7 +20,7 @@
     
     * TODO
         * Implement 'setup.py'
-        * Implement further other agents and envs
+        * Implement other agents and envs
     
 
     
