@@ -12,16 +12,18 @@ import json
 import logging
 import logging.config
 
+# time calculation
+import time
+
 # Saving
 from torchvision.utils import save_image
-from paths import IMAGE_PATH, LOAD_PATH, LOG_PATH
+from paths import LOAD_PATH
 from pathlib import Path
 import os.path
 
 # Tensorboard
 from tensorboardX import SummaryWriter
 
-import pdb
 
 """
     Abstract class for GAN Agent
@@ -31,7 +33,7 @@ import pdb
 class GanAgent(ABC):
 
 
-    def __init__(self, args, module, env, logger = None):
+    def __init__(self, args, module, env, logger = None, log_dir = None):
         # Modules
         self.generator = module.generator
         self.discriminator = module.discriminator
@@ -54,13 +56,16 @@ class GanAgent(ABC):
 
         # cuda
         self.cuda = args.cuda
+        self.tensor = torch.cuda.FloatTensor if self.cuda else torch.FloatTensor
 
         # tensorboard
         self.tensorboard = args.tensorboard
+        self.log_dir = log_dir
 
         # logger
         self.logger = logger
         self.exist_logger = args.logger
+        self.additional_logging = {}
         
         # save option
         self.image_save = args.image_save
@@ -69,9 +74,8 @@ class GanAgent(ABC):
         Loss function for discriminator
         differs by each module
     """
-
     @abstractmethod
-    def loss_D(self, real_imgs, fake_imgs):
+    def loss_D(self, real_imgs, fake_imgs) -> dict:
         # FIXME: implement loss function for each module in different module
         pass
 
@@ -79,134 +83,146 @@ class GanAgent(ABC):
         Loss function for generator
         universal for all modules
     """
-
-    def loss_G(self, fake_imgs):
-
+    def loss_G(self, fake_imgs) -> dict:
         # Can discriminate generated image?
         fake_validity = self.discriminator(fake_imgs)
         loss = -torch.mean(fake_validity)
-        return loss
+        return {"loss_G": loss}
 
     """
         train process for GAN
         universal for all modules
     """
-
     def train(self):
-        # Path to save images
         # Tensorboard Logging
         if self.tensorboard:
             writer = SummaryWriter()
-        dirname = os.path.join(IMAGE_PATH, self.env.env_name, self.agent, type(self.generator).__name__)
-        Path(dirname).mkdir(parents = True, exist_ok = True)
         
         # load dataloader
         train_dataloader = self.env.train
 
         # Setting
-        Tensor = torch.cuda.FloatTensor if self.cuda else torch.FloatTensor
         batches_done = 0
-        
+
+        # path for image
+        if self.image_save:
+            image_path = os.path.join(str(self.log_dir), "images")
+            Path(image_path).mkdir(parents=True, exist_ok=True)
+
         # Loop epoches
         for epoch in range(self.epoches):
 
             # Loop dataloader
             for i, (images, _) in enumerate(train_dataloader):
+
+                # measure time
+                start_time = time.time()
+
+                # real image
+                real_images = autograd.Variable(images.type(self.tensor))
+
+                # generate noise
+                z = self.generate_noise(images)
                 
-                # batch image
-                real_images = autograd.Variable(images.type(Tensor))
-
-                # Train Discriminator
-                self.discriminator.zero_grad()
-
-                # create noise z
-                if type(self.generator).__name__ is 'DCGenerator':
-                    z = autograd.Variable(torch.rand(images.shape[0], self.latent_dim, 1, 1).cuda())
-                else:
-                    z = autograd.Variable(Tensor(np.random.normal(0, 1, (images.shape[0], self.latent_dim))))
-
                 # Generate image
-                fake_images = self.generator(z)
+                fake_images = self.generate_image(z)
 
-                # Calculate the loss
-                discriminator_loss, wasserstein_distance = self.loss_D(real_images, fake_images)
+                # train discriminator
+                discriminator_loss = self.train_discriminator(real_images, fake_images)
 
-                # Calculate variance
-                # real_std = torch.std(self.discriminator(real_images)).item()
-                # fake_std = torch.std(self.discriminator(fake_images)).item()
-                # var_discrepency = abs(real_std ** 2 - fake_std ** 2)
+                # train generator for every n_critics
+                if batches_done % self.n_critic == 0:
+                    generator_loss = self.train_generator(z)
 
-                # Optimize discriminator
-                discriminator_loss.backward()
-                self.optim_D.step()
+                # measure time
+                elapsed_time = time.time() - start_time
 
-                # Train generator
-                self.generator.zero_grad()
+                self.additional_logging['elapsed_time_per_batch'] = elapsed_time
 
-                # train G for every n step
-                if i % self.n_critic == 0:
+                batches_done = epoch * len(train_dataloader) + i
 
-                    if self.exist_logger:
-                        self.logger.info("it is %d step. Train Generator" %i)
-
-                    fake_images = self.generator(z)
-                    # loss for generator -> can overcome discriminator?
-                    generator_loss = self.loss_G(fake_images)
-
-                    generator_loss.backward()
-                    self.optim_G.step()
-
-                    if self.image_save and (batches_done % self.sample_interval == 0):
-                        # Save fake images
-                        filename = os.path.join(dirname, "%d.png" %batches_done)
-                        save_image(fake_images.data[:25], str(filename), nrow = 5, normalize = True)
+                if batches_done % self.sample_interval == 0:
+                    if self.image_save:
+                        image_file = os.path.join(image_path, "%d.png" %batches_done)
+                        save_image(fake_images[:25], str(image_file), nrow = 5, normalize=True)
 
                         if self.exist_logger:
-                            self.logger.info("Sucessfully saved fake image")
+                            self.logger.info("Successfully saved fake image "+ str(image_file))
 
-                    # Logger
+                    logging_info = discriminator_loss.copy()
+                    logging_info.update(generator_loss)
+                    logging_info.update(self.additional_logging)
+                    #logging_info['elapsed_time'] = elapsed_time
+
                     if self.exist_logger:
-                        self.logger.info("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f] [W Dist: %f] [Real Var: %f] [Fake Var: %f] [Var Dis: %f]"
-                            % (epoch, 
-                            self.epoches, 
-                            i, 
-                            len(train_dataloader), 
-                            discriminator_loss.item(), 
-                            generator_loss.item(), 
-                            wasserstein_distance.item(),
-                            real_std ** 2,
-                            fake_std ** 2,
-                            var_discrepency))
-
-                    # TensorboardX
+                        self.log_training(epoch, i, len(train_dataloader), batches_done, logging_info) 
+                    
                     if self.tensorboard:
-                        # Add tensorboard loggings
-                        logging_info = {
-                            'Loss D': discriminator_loss.item(),
-                            'Loss G': generator_loss.item(),
-                            'Wasserstein Distance': wasserstein_distance.item(),
-                            'Var_dis': var_discrepency
-                        }
-
-                        # include in tensorboardX
                         for tag, value in logging_info.items():
                             writer.add_scalar(tag, value, batches_done)
+                            writer.add_images(image_file, fake_images, batches_done)
 
-                        # images
-                        if batches_done % self.sample_interval == 0:
-                            tag = self.env.env_name + " " + self.agent + " " + type(self.generator).__name__ + " %d" %batches_done
-                            writer.add_images(tag, fake_images, batches_done)
-                        self.logger.info("TensorboardX success")
-                        # Save fake images
-                        # filename = os.path.join(dirname, "%d.png" %batches_done)
-                        # save_image(fake_images.data[:25], str(filename), nrow = 5, normalize = True)
-                                            
-                    batches_done += self.n_critic
-                
-                # Implement tensorboardX
+    
+    """
+        Discriminator training
+    """
+    def train_discriminator(self, real_images, fake_images):
+        
+        # init
+        self.discriminator.zero_grad()
+        
+        # calculate loss
+        discriminator_loss = self.loss_D(real_images, fake_images)
+
+        # optimize discriminator
+        discriminator_loss.get("loss_D").backward()
+        self.optim_D.step()
+        
+        return discriminator_loss
+
+    """
+        Generator training
+    """
+    def train_generator(self, noise):
+         # init
+        self.generator.zero_grad()
+
+        # batches of fake images
+        fake_images = self.generate_image(noise)
+
+        # compute loss
+        generator_loss = self.loss_G(fake_images)
+
+        # optimize generator loss
+        generator_loss.get("loss_G").backward()
+        self.optim_G.step()
+
+        return generator_loss
 
 
+    """
+        noise generation
+    """
+    def generate_noise(self, images):
+        if type(self.generator).__name__ is 'DCGenerator':
+            z = autograd.Variable(torch.rand(images.shape[0], self.latent_dim, 1, 1).cuda())
+        else:
+            z = autograd.Variable(Tensor(np.random.normal(0, 1, (images.shape[0], self.latent_dim))))
 
+        return z
+
+    """
+        fake image generation from input noise
+    """
+    def generate_image(self, noise):
+        fake_images = self.generator(noise)
+        return fake_images
+
+    def log_training(self, epoch, i, len_batch, batches_done, logging_info: dict) -> None:
+        logging_message = "[Epoch: %d/%d] || [Batch: %d/%d] || [batches_done: %d] || " %(epoch, self.epoches, i, len_batch, batches_done)
+        for key, value in logging_info.items():
+            logging_message += "[{}: {}] || ".format(key, value)
+        self.logger.info(logging_message)
 
     def save_model(self):
         torch.save(self.generator.state_dict(), os.path.join(LOAD_PATH, self.agent, 'generator.pkl'))

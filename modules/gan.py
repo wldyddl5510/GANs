@@ -12,12 +12,14 @@ import logging.config
 class Generator(ABC, nn.Module):
     
     @abstractmethod
-    def __init__(self, image_shape, latent_dim, logger = None):
+    def __init__(self, args, device, activation = 'Tanh', logger = None):
         super().__init__()
+        self.image_shape = (args.channels, args.img_size, args.img_size)
         self.model = None
-        self.image_shape = image_shape
-        self.latent_dim = latent_dim
+        self.latent_dim = args.latent_dim
+        self.device = device
         self.logger = logger
+        self.activation = getattr(nn, activation)()
 
 
     def forward(self, z):
@@ -33,11 +35,12 @@ class Generator(ABC, nn.Module):
 class Discriminator(ABC, nn.Module):
 
     @abstractmethod
-    def __init__(self, image_shape, latent_dim, logger = None):
+    def __init__(self, args, device, logger = None):
         super().__init__()
+        self.image_shape = (args.channels, args.image_size, args.image_size)
         self.model = None
-        self.image_shape = image_shape
-        self.latent_dim = latent_dim
+        self.latent_dim = args.latent_dim
+        self.device = device
         self.logger = logger
 
     @abstractmethod

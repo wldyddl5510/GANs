@@ -5,10 +5,6 @@ import torch.autograd as autograd
 import torch
 from gan import Generator, Discriminator
 
-import json
-import logging
-import logging.config
-
 import numpy as np
 
 """
@@ -17,8 +13,8 @@ import numpy as np
 class LGenerator(Generator):
     
     # Generator __init__() 
-    def __init__(self, image_shape, latent_dim, logger = None):
-        super().__init__(image_shape, latent_dim, logger)
+    def __init__(self, args, device, logger = None):
+        super().__init__(args, device, logger)
 
         self.model = nn.Sequential(
             # 1st
@@ -35,14 +31,12 @@ class LGenerator(Generator):
 
             # 4th
             nn.Linear(512, 1024),
-            nn.LeakyReLU(1024, inplace = True),
+            nn.LeakyReLU(0.2, inplace = True),
 
             # Activate
             nn.Linear(1024, int(np.prod(image_shape))),
             nn.Tanh()
-        )
-
-        self.model = self.model.cuda()
+        ).to(device = self.device)
 
     def forward(self, z):
         image = super().forward(z)
@@ -52,8 +46,8 @@ class LGenerator(Generator):
 class LDiscriminator(Discriminator):
 
     # Discriminator __init__()
-    def __init__(self, image_shape, latent_dim, logger = None):
-        super().__init__(image_shape, latent_dim, logger)
+    def __init__(self, args, device, logger = None):
+        super().__init__(args, device, logger)
 
         self.model = nn.Sequential(
             # 1st layer
@@ -66,10 +60,8 @@ class LDiscriminator(Discriminator):
 
             # activate
             nn.Linear(256, 1)
-        )
+        ).to(device = self.device)
 
-        self.model = self.model.cuda()
-    
     def forward(self, image):
         image_flat = image.view(image.shape[0], -1)
         validity = self.model(image_flat)

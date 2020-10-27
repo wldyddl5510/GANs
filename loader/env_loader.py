@@ -1,5 +1,4 @@
-from settings import ENVS
-import pdb
+from utils.loader_lists import ENVS
 
 """
     Loader for Environment ( = dataset)
@@ -8,17 +7,25 @@ import pdb
 
 class EnvLoader:
 
+    def __init__(self, args, logger = None):
+        env = args.env
 
-    def __init__(self, env, batch_size, num_workers, image_shape, logger = None):
-        # Check for implementation
+        # Check Implementation
         if env not in [*ENVS]:
             raise NotImplementedError
+            
+        # set shape
+        image_shape = (args.channels, args.img_size, args.img_size)
 
-        # load dataset
-        loader = ENVS[env](batch_size, num_workers, image_shape)
+        # Load dataset
+        loader = ENVS[env](args.batch_size, args.num_workers, image_shape)
         for key, value in loader.items():
             setattr(self, key, value)
+        
+        # set name
         self.env_name = env
+
+        # logging
         if logger is not None:
             self.logger = logger
             self.logger.info("Sucessfully loaded env: " + self.env_name)

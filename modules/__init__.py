@@ -8,3 +8,4 @@ sys.path.append(os.path.join(PROJECT_PATH, 'modules'))
 from gan import *
 from dcgan import *
 from lgan import *
+from hidcgan import *

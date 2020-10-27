@@ -5,8 +5,6 @@ import numpy as np
 
 import torch.autograd as autograd
 
-import pdb
-
 NORM = {'L1': 1, 'L2': 2}
 
 class WGanGPAgent(GanAgent):
@@ -14,8 +12,8 @@ class WGanGPAgent(GanAgent):
     """
        WGAN_GP requires one more parameters than usual GAN -> lambda for gradient penalty
     """
-    def __init__(self, args, module, env, logger = None):
-        super().__init__(args, module, env, logger)
+    def __init__(self, args, module, env, logger = None, log_dir = None):
+        super().__init__(args, module, env, logger, log_dir)
         self.lambda_gp = args.lambda_gp
 
     """
@@ -32,8 +30,9 @@ class WGanGPAgent(GanAgent):
         # calculate loss for wgan_gp
         # L (Wasserstein Metric) = -E(D(x)) + E(D(G(z))) + (lambda * gp)
         loss = -torch.mean(real_validity) + torch.mean(fake_validity) + self.lambda_gp * gp
-        wasserstein_distance = torch.mean(real_validity) - torch.mean(fake_validity) 
-        return loss, wasserstein_distance
+        with torch.no_grad():
+            wasserstein_distance = torch.mean(real_validity) - torch.mean(fake_validity) 
+        return {"loss_D": loss, "wasserstein_distance": wasserstein_distance}
 
     """
         Calculate lipchisz gradient penalty
@@ -80,3 +79,4 @@ class WGanGPAgent(GanAgent):
 
         # Return
         return gradient_penalty
+

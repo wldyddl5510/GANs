@@ -8,3 +8,5 @@ sys.path.append(os.path.join(PROJECT_PATH, 'envs'))
 from mnist import *
 from cifar import *
 from imagenet import *
+from celeba import *
+from lsun import *
